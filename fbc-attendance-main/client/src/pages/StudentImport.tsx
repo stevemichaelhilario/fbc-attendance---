@@ -44,17 +44,38 @@ function parseCsv(source: string): string[][] {
   return rows;
 }
 
-function normalizeHeader(value: string) {
-  return value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+export function normalizeHeader(value: string) {
+  const normalized = value.normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const aliases: Record<string, string> = {
+    id: 'student_id',
+    studentid: 'student_id',
+    student_no: 'student_id',
+    student_number: 'student_id',
+    firstname: 'first_name',
+    middlename: 'middle_name',
+    lastname: 'last_name',
+    course_name: 'course',
+    yearlevel: 'year_level',
+    academic_year_level: 'year_level',
+    section_name: 'section',
+    section_id: 'section',
+    parent_email_address: 'parent_email',
+    parentemail: 'parent_email',
+  };
+  return aliases[normalized] ?? normalized;
 }
 
-function parseStudentCsv(source: string, options: Options, role: string): ImportRow[] {
+export function parseStudentCsv(source: string, options: Options, role: string): ImportRow[] {
   const records = parseCsv(source);
   if (records.length < 2) throw new Error('The CSV needs a header row and at least one student.');
   if (records.length - 1 > MAX_ROWS) throw new Error(`Import up to ${MAX_ROWS} students at a time.`);
   const headers = records[0].map(normalizeHeader);
-  const aliases: Record<string, string> = { student_no: 'student_id', studentid: 'student_id', id: 'student_id', parent_email_address: 'parent_email' };
-  const column = (name: string) => headers.indexOf(aliases[name] ?? name);
+  const column = (name: string) => headers.indexOf(name);
   const required = ['student_id', 'first_name', 'last_name', 'course', 'year_level'];
   const missing = required.filter(name => column(name) < 0);
   if (missing.length) throw new Error(`Missing CSV column${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}.`);
@@ -101,8 +122,12 @@ function parseStudentCsv(source: string, options: Options, role: string): Import
   return rows;
 }
 
+export function createStudentImportTemplate() {
+  return `${HEADERS.join(',')}\r\n`;
+}
+
 function downloadTemplate() {
-  const blob = new Blob([`${HEADERS.join(',')}\r\n`], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob([createStudentImportTemplate()], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
