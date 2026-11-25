@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useApi } from '../hooks';
 import { Tabs, IconLabel } from '../ui';
@@ -20,6 +20,7 @@ export default function TakeAttendance({ onKioskStarted }: { onKioskStarted: () 
 function KioskLaunch({ onStarted }: { onStarted: () => void }) {
   const { data: rooms } = useApi<string[]>('/rooms');
   const [room, setRoom] = useState('');
+  useEffect(() => { if (!room && rooms?.length === 1) setRoom(rooms[0]); }, [room, rooms]);
   const start = async () => {
     if (!confirm('Start the check-in camera on this computer? You will be signed out here so students can only use check-in.')) return;
     await api('/kiosk/start', { body: { room } });

@@ -67,6 +67,7 @@ Keep the terminal window open while the system is in use. To start it automatica
 
 ## Using it
 
+- **Import students in bulk:** Open **Students** and choose **Import students**. Download the CSV template, fill in one student per row, then upload it to preview row-by-row validation before saving. Student ID, first name, last name, course and year level are required; teachers must choose one of their assigned sections. Duplicate or invalid rows are skipped, while valid rows can still be imported. CSV files up to 2 MB and 2,000 rows are supported; XLSX is not supported.
 - **Register a face:** Students → **Face** → record the parent/guardian consent → **Start** and follow the 5 poses.
   **Delete face data** on the same page removes it when consent is withdrawn or the student leaves.
 - **Kiosk:** on the entrance laptop, sign in → **Face Check-in Kiosk** → **Start kiosk**. This signs you out on that device so students can't open other pages.

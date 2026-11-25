@@ -3,7 +3,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from './config.js';
-import { exec, one } from './db.js';
+import { exec, one, query } from './db.js';
 import { h, HttpError, text } from './util.js';
 
 export interface SessionUser {
@@ -11,7 +11,7 @@ export interface SessionUser {
   name: string;
   email: string;
   picture: string;
-  role: 'admin' | 'teacher' | 'student';
+  role: 'admin' | 'teacher' | 'student' | 'parent';
   teacher_id: number | null;
 }
 
@@ -28,7 +28,10 @@ const oauth = () => new OAuth2Client(config.google.clientId, config.google.clien
 
 /** Signs a person in after Google confirms who they are. New users start as teachers. */
 export async function signIn(req: Request, email: string, name: string, picture: string) {
-  const role = config.adminEmails.includes(email.toLowerCase()) ? 'admin' : undefined;
+  const normalizedEmail = email.toLowerCase();
+  const role = config.adminEmails.includes(normalizedEmail)
+    ? 'admin'
+    : await one('SELECT 1 AS x FROM students WHERE LOWER(parent_email)=?', [normalizedEmail]) ? 'parent' : undefined;
   let user = await one('SELECT * FROM users WHERE email=?', [email]);
   if (!user) {
     const r = await exec('INSERT INTO users (name, email, picture, role) VALUES (?, ?, ?, ?)',
@@ -106,7 +109,7 @@ export function authRoutes(): Router {
     const f = failures.get(email);
     if (f && f.until > Date.now()) throw new HttpError(429, 'Too many wrong tries. Wait a few minutes and try again.');
     const user = email ? await one('SELECT * FROM users WHERE email=?', [email]) : null;
-    if (!user || user.role === 'student' || !checkPassword(password, user.password_hash)) {
+    if (!user || (user.role !== 'parent' && user.role === 'student') || !checkPassword(password, user.password_hash)) {
       const count = (f?.until && f.until <= Date.now() ? 0 : f?.count ?? 0) + 1;
       failures.set(email, { count, until: count >= 5 ? Date.now() + 5 * 60 * 1000 : 0 });
       throw new HttpError(401, 'Wrong email or password.');
@@ -122,6 +125,8 @@ export function authRoutes(): Router {
 
 export function requireStaff(req: Request, res: Response, next: NextFunction) {
   if (!req.session.user) return res.status(401).json({ error: 'Please sign in.' });
+  if (req.session.user.role !== 'admin' && req.session.user.role !== 'teacher')
+    return res.status(403).json({ error: 'Staff access required.' });
   next();
 }
 
@@ -132,6 +137,7 @@ export function requireKiosk(req: Request, res: Response, next: NextFunction) {
 
 /** Teachers linked to a teachers row (same email) only see their own classes. */
 export function teacherFilter(user: SessionUser): { sql: string; params: unknown[] } {
-  if (user.role !== 'admin' && user.teacher_id) return { sql: ' AND c.teacher_id = ?', params: [user.teacher_id] };
-  return { sql: '', params: [] };
+  if (user.role === 'admin') return { sql: '', params: [] };
+  if (user.role === 'teacher' && user.teacher_id) return { sql: ' AND c.teacher_id = ?', params: [user.teacher_id] };
+  return { sql: ' AND 1=0', params: [] };
 }

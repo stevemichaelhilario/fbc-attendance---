@@ -37,7 +37,9 @@ export async function matchFace(embedding: number[]): Promise<MatchResult> {
   const rows = await query<{ student_id: number; embedding: Buffer }>(
     `SELECT f.student_id, f.embedding FROM student_faces f
      JOIN students s ON s.student_id = f.student_id
-     WHERE s.face_consent_at IS NOT NULL AND f.model = ?`, [FACE_MODEL]);
+    WHERE s.face_consent_at IS NOT NULL AND s.section_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM sections sec WHERE sec.section_id=s.section_id)
+      AND f.model = ?`, [FACE_MODEL]);
   const best = new Map<number, number>();
   for (const r of rows) {
     const d = faceDistance(embedding, unpackEmbedding(r.embedding));

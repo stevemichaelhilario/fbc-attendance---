@@ -80,3 +80,9 @@ export function Stepper({ steps, current }: { steps: string[]; current: number }
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
+
+export function DataState({ loading, error, onRetry }: { loading: boolean; error: string; onRetry: () => void }) {
+  if (loading) return <div className="card data-state" role="status">Loading data…</div>;
+  if (!error) return null;
+  return <div className="alert alert-error data-error" role="alert"><span>{error}</span><button className="btn btn-outline btn-sm" onClick={onRetry}>Try again</button></div>;
+}

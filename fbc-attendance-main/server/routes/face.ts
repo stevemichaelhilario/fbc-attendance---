@@ -12,7 +12,18 @@ import { h, HttpError, int, text } from '../util.js';
 export const faceRoutes = express.Router();
 faceRoutes.use(requireStaff);
 
+async function requireStudentAccess(req: express.Request, id: number) {
+  const user = req.session.user!;
+  if (user.role === 'admin') return;
+  if (user.role !== 'teacher' || !user.teacher_id) throw new HttpError(404, 'Student not found.');
+  const student = await one(`SELECT student_id FROM students WHERE student_id=? AND section_id IN
+    (SELECT section_id FROM sections WHERE class_id IN (SELECT class_id FROM classes WHERE teacher_id=?))`,
+  [id, user.teacher_id]);
+  if (!student) throw new HttpError(404, 'Student not found.');
+}
+
 faceRoutes.post('/students/:id/consent', h(async (req, res) => {
+  await requireStudentAccess(req, int(req.params.id));
   const by = text(req.body.consent_by, 150);
   if (!by || !req.body.confirm) throw new HttpError(400, 'Enter the parent/guardian name and tick the confirmation box.');
   await exec('UPDATE students SET face_consent_at=NOW(), face_consent_by=? WHERE student_id=?', [by, int(req.params.id)]);
@@ -22,6 +33,7 @@ faceRoutes.post('/students/:id/consent', h(async (req, res) => {
 // Deletes all face data and withdraws consent; the student goes back to manual attendance.
 faceRoutes.delete('/students/:id/face', h(async (req, res) => {
   const id = int(req.params.id);
+  await requireStudentAccess(req, id);
   await exec('DELETE FROM student_faces WHERE student_id=?', [id]);
   await exec('UPDATE students SET face_consent_at=NULL, face_consent_by=NULL WHERE student_id=?', [id]);
   res.json({ ok: true });
@@ -29,6 +41,7 @@ faceRoutes.delete('/students/:id/face', h(async (req, res) => {
 
 faceRoutes.post('/students/:id/face', h(async (req, res) => {
   const id = int(req.params.id);
+  await requireStudentAccess(req, id);
   const stu = await one('SELECT face_consent_at FROM students WHERE student_id=?', [id]);
   if (!stu) throw new HttpError(404, 'Student not found.');
   if (!stu.face_consent_at) throw new HttpError(400, 'Record consent first.');
@@ -45,8 +58,7 @@ faceRoutes.post('/students/:id/face', h(async (req, res) => {
   for (const s of samples) {
     const m = await matchFace(s);
     if (m.student && m.student.student_id !== id) {
-      const other = `${m.student.first_name} ${m.student.last_name}`;
-      throw new HttpError(409, `This face is very similar to ${other}, who is already registered. If that is a mistake, remove ${other}'s face data first.`);
+      throw new HttpError(409, 'This face is very similar to another student who is already registered. Ask an administrator to review it.');
     }
   }
 
@@ -74,15 +86,29 @@ async function qrFor(studentId: number, renew = false) {
   return token;
 }
 
-faceRoutes.get('/students/:id/qr', h(async (req, res) => { res.json({ token: await qrFor(int(req.params.id)) }); }));
+faceRoutes.get('/students/:id/qr', h(async (req, res) => {
+  await requireStudentAccess(req, int(req.params.id));
+  res.json({ token: await qrFor(int(req.params.id)) });
+}));
 // A lost card: the old code stops working.
-faceRoutes.post('/students/:id/qr', h(async (req, res) => { res.json({ token: await qrFor(int(req.params.id), true) }); }));
+faceRoutes.post('/students/:id/qr', h(async (req, res) => {
+  await requireStudentAccess(req, int(req.params.id));
+  res.json({ token: await qrFor(int(req.params.id), true) });
+}));
 
-// Cards for printing: everyone, or one section.
+// Administrators can print every card; teachers can print cards for their assigned sections.
 faceRoutes.get('/qr-cards', h(async (req, res) => {
   const sectionId = int(req.query.section_id);
-  const where = sectionId ? 'WHERE s.section_id = ?' : '';
-  const params = sectionId ? [sectionId] : [];
+  const user = req.session.user!;
+  if (user.role !== 'admin' && (user.role !== 'teacher' || !user.teacher_id)) throw new HttpError(403, 'Only teachers and administrators can access student QR cards.');
+  const filters: string[] = [];
+  const params: unknown[] = [];
+  if (user.role === 'teacher') {
+    filters.push('s.section_id IN (SELECT section_id FROM sections WHERE class_id IN (SELECT class_id FROM classes WHERE teacher_id=?))');
+    params.push(user.teacher_id);
+  }
+  if (sectionId) { filters.push('s.section_id=?'); params.push(sectionId); }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const missing = await query(`SELECT student_id FROM students s ${where ? where + ' AND' : 'WHERE'} qr_token IS NULL`, params);
   for (const m of missing) await qrFor(m.student_id);
   res.json(await query(`
@@ -137,7 +163,9 @@ kioskRoutes.post('/checkin', requireKiosk, h(async (req, res) => {
 // The student's QR card, for when the face isn't recognized.
 kioskRoutes.post('/checkin-qr', requireKiosk, h(async (req, res) => {
   const token = text(req.body.token, 40);
-  const stu = token.startsWith(QR_PREFIX) ? await one('SELECT * FROM students WHERE qr_token=?', [token]) : undefined;
+  const stu = token.startsWith(QR_PREFIX) ? await one(`SELECT s.* FROM students s
+    WHERE s.qr_token=? AND s.section_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM sections sec WHERE sec.section_id=s.section_id)`, [token]) : undefined;
   if (!stu) return res.json({ result: 'unknown_qr' });
   res.json(await scanOnce(stu, () => recordCheckin(req, stu, 'qr', null)));
 }));
@@ -191,6 +219,7 @@ async function recordDaily(stu: Record<string, any>, date: string, time: string,
   if (!existing) {
     await exec(`INSERT INTO attendance (student_id, date, status, recorded_by, time_in, method, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?)`, [studentId, date, status, by, time, method, confidence]);
+    if (status === 'Present') notifyParents(studentId, 'Present', date, formatTime(time)).catch(() => {});
   } else if (existing.status === 'Absent') {
     // Marked absent (by a teacher or the auto-absent job) but showed up: they are late.
     status = 'Late';

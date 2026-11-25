@@ -15,6 +15,9 @@ export const NAV: { to: string; label: string; icon: string; hint: string }[] = 
 
 export function Layout({ user, title, hint, children }: { user: User; title: string; hint?: string; children: ReactNode }) {
   const navigate = useNavigate();
+  const navigation = user.role === 'parent'
+    ? [{ to: '/', label: 'Parent Dashboard', icon: 'home', hint: 'Linked children, live attendance and notification history.' }]
+    : NAV;
   const logout = async () => { await fetch('/auth/logout', { method: 'POST' }).catch(() => {}); navigate('/login'); };
   return (
     <>
@@ -24,7 +27,7 @@ export function Layout({ user, title, hint, children }: { user: User; title: str
           <div className="s-title">FBC <small>Attendance System</small></div>
         </div>
         <nav>
-          {NAV.map(n => (
+          {navigation.map(n => (
             <NavLink key={n.to} to={n.to} end={n.to === '/'} title={n.hint}
                      className={({ isActive }) => 'nav-link' + (isActive ? ' active' : '')}>
               <span className="nav-ico"><Icon name={n.icon} /></span>{n.label}
@@ -52,7 +55,7 @@ export function Layout({ user, title, hint, children }: { user: User; title: str
         </div>
         <div className="content">{children}</div>
         <nav className="bottom-nav">
-          {NAV.map(n => (
+          {navigation.map(n => (
             <NavLink key={n.to} to={n.to} end={n.to === '/'} className={({ isActive }) => 'bn-link' + (isActive ? ' active' : '')}>
               <Icon name={n.icon} /><span>{n.label}</span>
             </NavLink>

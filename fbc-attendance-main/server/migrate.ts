@@ -16,7 +16,7 @@ const TABLES: Record<string, string> = {
     name VARCHAR(100) NOT NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
     picture VARCHAR(255),
-    role ENUM('admin','teacher','student') DEFAULT 'teacher',
+    role ENUM('admin','teacher','student','parent') DEFAULT 'teacher',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`,
   teachers: `CREATE TABLE IF NOT EXISTS teachers (
     teacher_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -77,6 +77,9 @@ const TABLES: Record<string, string> = {
     recipient_email VARCHAR(150) NOT NULL,
     subject VARCHAR(255),
     message TEXT,
+    event_type VARCHAR(20),
+    event_key VARCHAR(100),
+    event_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE)`,
   student_faces: `CREATE TABLE IF NOT EXISTS student_faces (
@@ -120,12 +123,16 @@ const COLUMNS: [string, string, string][] = [
   ['attendance', 'confidence', 'DECIMAL(4,3) NULL'],
   // QR code sign-in: a random code per student, printed on their card.
   ['students', 'qr_token', 'VARCHAR(40) NULL UNIQUE'],
+  ['notifications', 'event_type', 'VARCHAR(20) NULL'],
+  ['notifications', 'event_key', 'VARCHAR(100) NULL'],
+  ['notifications', 'event_at', 'TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP'],
 ];
 
 // Choice lists that gained a value: [table, column, new definition, value that must be allowed].
 const ENUMS: [string, string, string, string][] = [
   ['attendance', 'method', "ENUM('manual','face','qr','auto') NOT NULL DEFAULT 'manual'", 'qr'],
   ['class_checkins', 'method', "ENUM('face','qr','manual','demo') NOT NULL", 'qr'],
+  ['users', 'role', "ENUM('admin','teacher','student','parent') DEFAULT 'teacher'", 'parent'],
 ];
 
 export async function migrate(log = console.log) {
@@ -160,6 +167,18 @@ export async function migrate(log = console.log) {
       log(`Updated ${table}.${column}`);
     }
   }
+  await c.query(`CREATE UNIQUE INDEX IF NOT EXISTS notifications_recipient_event_unique
+                 ON notifications (recipient_email, event_key)`)
+    .catch(async () => {
+      const [rows] = await c.query(
+        `SELECT 1 FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA=? AND TABLE_NAME='notifications' AND INDEX_NAME='notifications_recipient_event_unique'`,
+        [database],
+      );
+      if (!(rows as unknown[]).length)
+        await c.query(`CREATE UNIQUE INDEX notifications_recipient_event_unique
+                       ON notifications (recipient_email, event_key)`);
+    });
   await c.end();
   log(`Database "${database}" is ready.`);
 }

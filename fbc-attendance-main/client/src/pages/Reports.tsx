@@ -13,7 +13,7 @@ export default function Reports() {
   const { data: sections } = useApi<{ section_id: number; section_name: string }[]>('/sections');
   const [month, setMonth] = useState(todayStr().slice(0, 7));
   const [sectionId, setSectionId] = useState(0);
-  const { data } = useApi<Report>(month ? `/reports?month=${month}&section_id=${sectionId}` : null);
+  const { data } = useApi<Report>(month ? `/reports?month=${month}&section_id=${sectionId}` : null, 15000);
   const t = data?.totals;
   return (
     <>

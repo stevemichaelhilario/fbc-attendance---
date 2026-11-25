@@ -5,10 +5,13 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(100) NOT NULL,
   email VARCHAR(150) NOT NULL UNIQUE,
   picture VARCHAR(255),
-  role VARCHAR(10) DEFAULT 'teacher' CHECK (role IN ('admin','teacher','student')),
+  role VARCHAR(10) DEFAULT 'teacher' CHECK (role IN ('admin','teacher','student','parent')),
   created_at TIMESTAMP(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   password_hash VARCHAR(200)
 );
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+  CHECK (role IN ('admin','teacher','student','parent'));
 CREATE TABLE IF NOT EXISTS teachers (
   teacher_id SERIAL PRIMARY KEY,
   first_name VARCHAR(80) NOT NULL,
@@ -90,8 +93,17 @@ CREATE TABLE IF NOT EXISTS notifications (
   recipient_email VARCHAR(150) NOT NULL,
   subject VARCHAR(255),
   message TEXT,
+  event_type VARCHAR(20),
+  event_key VARCHAR(100),
+  event_at TIMESTAMP(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sent_at TIMESTAMP(0) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_type VARCHAR(20);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_key VARCHAR(100);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_at TIMESTAMP(0) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+CREATE UNIQUE INDEX IF NOT EXISTS notifications_event_unique
+  ON notifications (recipient_email, event_key)
+  WHERE event_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS student_faces (
   face_id SERIAL PRIMARY KEY,
   student_id INT NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,

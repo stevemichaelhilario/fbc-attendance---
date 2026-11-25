@@ -42,6 +42,17 @@ kbd { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 12px; paddi
 
 /* Toolbars, add panels, search, empty states */
 .toolbar { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 18px; }
+.toolbar > select { min-width: 150px; max-width: 220px; }
+.parent-child-card { display: block; color: inherit; text-decoration: none; transition: transform .18s, box-shadow .18s; }
+.parent-child-card:hover { color: inherit; text-decoration: none; transform: translateY(-2px); box-shadow: var(--neu-raised-lg); }
+.parent-child-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.parent-child-head h3, .teacher-class-card h3 { margin: 0 0 4px; color: var(--text); }
+.parent-arrival { margin-top: 12px; font-weight: 600; color: var(--text); }
+.teacher-class-card { margin-bottom: 18px; }
+.teacher-section { margin-top: 16px; }
+.teacher-section h4 { margin: 0 0 10px; color: var(--muted); }
+.teacher-student-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.teacher-student-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; background: var(--white); }
 .toolbar > .add-panel { flex: 1 1 100%; order: 2; margin-bottom: 0; }
 .add-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .search { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 220px; max-width: 420px; padding: 0 14px; border-radius: 12px; box-shadow: var(--neu-inset-sm); color: var(--muted); }
@@ -88,6 +99,41 @@ kbd { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 12px; paddi
 
 /* School setup: classes with their sections */
 .class-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 22px; }
+
+/* Bulk student import */
+.student-import { display: grid; gap: 16px; }
+.import-intro { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.import-intro h3 { margin-bottom: 2px; }
+.import-intro .muted, .import-instructions { font-size: 13px; }
+.import-instructions { color: var(--muted); }
+.import-drop { min-height: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 20px; border: 2px dashed var(--border); border-radius: 16px; cursor: pointer; text-align: center; transition: border-color .2s, background .2s; }
+.import-drop svg { width: 26px; height: 26px; color: var(--maroon); }
+.import-drop.dragging, .import-drop:hover { border-color: var(--maroon); background: var(--maroon-light); }
+.import-progress { display: grid; gap: 6px; font-size: 13px; }
+.import-progress-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.import-progress progress { width: 100%; height: 8px; accent-color: var(--maroon); }
+.spinner { width: 15px; height: 15px; border: 2px solid var(--border); border-top-color: var(--maroon); border-radius: 50%; animation: import-spin .8s linear infinite; }
+@keyframes import-spin { to { transform: rotate(360deg); } }
+.import-summary, .import-results { display: flex; gap: 8px 16px; flex-wrap: wrap; align-items: center; padding: 12px; border-radius: 12px; box-shadow: var(--neu-inset-sm); font-size: 13px; }
+.import-valid { color: var(--success-text); }
+.import-duplicate, .import-invalid { color: var(--danger-text); }
+.import-table-wrap { max-height: 380px; overflow: auto; border-radius: 12px; box-shadow: var(--neu-inset-sm); }
+.import-table { min-width: 1050px; font-size: 12px; }
+.import-table th { position: sticky; top: 0; z-index: 1; background: var(--neu-bg); }
+.import-table td { vertical-align: top; }
+.import-status { font-weight: 700; text-transform: capitalize; }
+.import-status.valid, .import-status.imported { color: var(--success-text); }
+.import-status.duplicate, .import-status.invalid, .import-status.failed { color: var(--danger-text); }
+.import-row-error { max-width: 240px; color: var(--danger-text); font-size: 11px; }
+.import-results { background: var(--success-bg); color: var(--success-text); }
+
+@media (max-width: 640px) {
+    .student-import { gap: 12px; }
+    .import-intro { align-items: stretch; }
+    .import-intro > button { width: 100%; justify-content: center; }
+    .import-drop { min-height: 125px; }
+    .import-results, .import-summary { gap: 6px 10px; }
+}
 .class-card { margin-bottom: 0; }
 .class-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
 .class-head h3 { font-size: 17px; }

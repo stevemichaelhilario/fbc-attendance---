@@ -1,8 +1,9 @@
 // Students, teachers, classes, sections, schedules.
 import express from 'express';
-import { exec, one, query } from '../db.js';
+import { exec, one, query, transaction } from '../db.js';
 import { hashPassword } from '../auth.js';
 import { DAYS, h, HttpError, int, nullableId, required, text } from '../util.js';
+import type { SessionUser } from '../auth.js';
 
 const r = express.Router();
 
@@ -12,21 +13,193 @@ function dupMessage(e: any, what: string): never {
 }
 
 // ---- Students ----
-r.get('/students', h(async (_req, res) => {
+const YEAR_LEVELS = ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'];
+const MAX_STUDENT_IMPORT_ROWS = 2000;
+
+function studentScope(user: SessionUser) {
+  if (user.role === 'admin') return { sql: '', params: [] as unknown[] };
+  if (user.role === 'teacher' && user.teacher_id) {
+    return {
+      sql: ' AND s.section_id IN (SELECT section_id FROM sections WHERE class_id IN (SELECT class_id FROM classes WHERE teacher_id=?))',
+      params: [user.teacher_id],
+    };
+  }
+  return { sql: ' AND 1=0', params: [] as unknown[] };
+}
+
+function canImport(user: SessionUser) {
+  if (user.role === 'admin') return true;
+  if (user.role !== 'teacher' || !user.teacher_id) throw new HttpError(403, 'Only authorized teachers and administrators can import students.');
+  return true;
+}
+
+function isUniqueViolation(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false;
+  return error.code === 'ER_DUP_ENTRY' || error.code === '23505';
+}
+
+async function importSections(user: SessionUser) {
+  canImport(user);
+  return user.role === 'admin'
+    ? query<{ section_id: number; section_name: string }>('SELECT section_id, section_name FROM sections ORDER BY section_name')
+    : query<{ section_id: number; section_name: string }>(
+      `SELECT section_id, section_name FROM sections WHERE class_id IN
+       (SELECT class_id FROM classes WHERE teacher_id=?) ORDER BY section_name`, [user.teacher_id]);
+}
+
+r.get('/students/import-options', h(async (req, res) => {
+  res.json({ sections: await importSections(req.session.user!), yearLevels: YEAR_LEVELS, role: req.session.user!.role });
+}));
+
+type ImportStudent = {
+  student_no: unknown; first_name: unknown; middle_name: unknown; last_name: unknown;
+  course: unknown; year_level: unknown; gender: unknown; section_id: unknown; parent_email: unknown;
+};
+type ImportRowResult = { index: number; status: 'valid' | 'duplicate' | 'invalid' | 'imported' | 'failed'; errors: string[] };
+
+function importRows(value: unknown): ImportStudent[] {
+  if (!Array.isArray(value) || value.length === 0) throw new HttpError(400, 'Add at least one student record.');
+  if (value.length > MAX_STUDENT_IMPORT_ROWS) throw new HttpError(400, `Import up to ${MAX_STUDENT_IMPORT_ROWS} students at a time.`);
+  if (value.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new HttpError(400, 'Every student record must be an object.');
+  return value as ImportStudent[];
+}
+
+function cleanImportStudent(row: ImportStudent) {
+  return {
+    student_no: text(row.student_no, 30),
+    first_name: text(row.first_name, 80),
+    middle_name: text(row.middle_name, 80) || null,
+    last_name: text(row.last_name, 80),
+    course: text(row.course, 100),
+    year_level: text(row.year_level, 30),
+    gender: text(row.gender, 30),
+    section_id: nullableId(row.section_id),
+    parent_email: text(row.parent_email, 150) || null,
+  };
+}
+
+async function validateImportRows(rows: ImportStudent[], user: SessionUser): Promise<ImportRowResult[]> {
+  const sections = await importSections(user);
+  const sectionIds = new Set(sections.map(s => Number(s.section_id)));
+  const cleaned = rows.map(cleanImportStudent);
+  const idCounts = new Map<string, number>();
+  const rawIds = rows.map(row => typeof row.student_no === 'string' ? row.student_no.trim() : '');
+  for (const id of rawIds) {
+    const key = id.toLowerCase();
+    if (key && key.length <= 30) idCounts.set(key, (idCounts.get(key) ?? 0) + 1);
+  }
+  const ids = [...idCounts.keys()].filter(id => id.length <= 30);
+  const existing = new Set<string>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const batch = ids.slice(i, i + 500);
+    if (batch.length) {
+      const found = await query<{ student_no: string }>(
+        `SELECT student_no FROM students WHERE LOWER(student_no) IN (${batch.map(() => '?').join(',')})`,
+        batch,
+      );
+      found.forEach(s => existing.add(s.student_no.toLowerCase()));
+    }
+  }
+
+  return cleaned.map((row, index) => {
+    const errors: string[] = [];
+    const limits: [keyof ImportStudent, number][] = [
+      ['student_no', 30], ['first_name', 80], ['middle_name', 80], ['last_name', 80],
+      ['course', 100], ['year_level', 30], ['gender', 6], ['parent_email', 150],
+    ];
+    for (const [field, limit] of limits) {
+      const value = rows[index][field];
+      if (value !== null && value !== undefined && typeof value !== 'string') errors.push(`${field.replace(/_/g, ' ')} must be text.`);
+      else if (typeof value === 'string' && value.trim().length > limit) errors.push(`${field.replace(/_/g, ' ')} must be ${limit} characters or fewer.`);
+    }
+    const rawSection = rows[index].section_id;
+    if (rawSection !== null && rawSection !== undefined && String(rawSection).trim() !== '' &&
+        !/^\d+$/.test(String(rawSection).trim())) errors.push('Section assignment is invalid.');
+    if (!row.student_no) errors.push('Student ID is required.');
+    if (!row.first_name) errors.push('First name is required.');
+    if (!row.last_name) errors.push('Last name is required.');
+    if (!row.course) errors.push('Course is required.');
+    if (!YEAR_LEVELS.includes(row.year_level)) errors.push('Year level must be 1st Year through 5th Year.');
+    if (row.gender && !['Male', 'Female', 'Other'].includes(row.gender)) errors.push('Gender must be Male, Female, or Other.');
+    if (row.parent_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.parent_email)) errors.push('Parent email is invalid.');
+    if (user.role === 'teacher' && row.section_id === null) errors.push('A section assigned to you is required.');
+    if (row.section_id !== null && (!Number.isInteger(row.section_id) || !sectionIds.has(row.section_id))) {
+      errors.push('Section is not available to your account.');
+    }
+    const id = rawIds[index].toLowerCase();
+    const duplicate = id.length > 0 && id.length <= 30 &&
+      ((idCounts.get(id) ?? 0) > 1 || existing.has(id));
+    if (duplicate) errors.push('Student ID already exists or is repeated in this file.');
+    if (duplicate) {
+      return { index, status: 'duplicate', errors };
+    }
+    return { index, status: errors.length ? 'invalid' : 'valid', errors };
+  });
+}
+
+r.post('/students/import/validate', h(async (req, res) => {
+  const rows = importRows(req.body?.students);
+  res.json({ rows: await validateImportRows(rows, req.session.user!) });
+}));
+
+r.post('/students/import', h(async (req, res) => {
+  const rows = importRows(req.body?.students);
+  const checks = await validateImportRows(rows, req.session.user!);
+  const results: ImportRowResult[] = checks.map(r => ({ ...r }));
+  const valid = checks.map((r, index) => r.status === 'valid' ? index : -1).filter(index => index >= 0);
+
+  await transaction(async run => {
+    for (const index of valid) {
+      const row = cleanImportStudent(rows[index]);
+      await run('SAVEPOINT student_import_row');
+      try {
+        await run(`INSERT INTO students
+          (student_no, first_name, middle_name, last_name, course, year_level, gender, section_id, parent_email)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [row.student_no, row.first_name, row.middle_name, row.last_name, row.course, row.year_level,
+          row.gender || null, row.section_id, row.parent_email]);
+        results[index] = { index, status: 'imported', errors: [] };
+        await run('RELEASE SAVEPOINT student_import_row');
+      } catch (error) {
+        await run('ROLLBACK TO SAVEPOINT student_import_row');
+        await run('RELEASE SAVEPOINT student_import_row');
+        if (isUniqueViolation(error)) {
+          results[index] = { index, status: 'duplicate', errors: ['Student ID already exists.'] };
+        } else {
+          console.error(`Student import failed for row ${index + 1}:`, error);
+          results[index] = { index, status: 'failed', errors: ['The database could not save this record.'] };
+        }
+      }
+    }
+  });
+
+  res.json({
+    total: rows.length,
+    imported: results.filter(r => r.status === 'imported').length,
+    duplicates: results.filter(r => r.status === 'duplicate').length,
+    invalid: results.filter(r => r.status === 'invalid').length,
+    failed: results.filter(r => r.status === 'failed').length,
+    rows: results,
+  });
+}));
+
+r.get('/students', h(async (req, res) => {
+  const scope = studentScope(req.session.user!);
   res.json(await query(`
     SELECT s.student_id, s.student_no, s.first_name, s.middle_name, s.last_name, s.course, s.year_level, s.gender,
            s.section_id, s.parent_email, s.face_consent_at, s.face_consent_by, sec.section_name,
            (SELECT COUNT(*) FROM student_faces f WHERE f.student_id = s.student_id) AS face_samples
-    FROM students s LEFT JOIN sections sec ON s.section_id = sec.section_id
-    ORDER BY s.last_name, s.first_name`));
+    FROM students s LEFT JOIN sections sec ON s.section_id = sec.section_id WHERE 1=1 ${scope.sql}
+    ORDER BY s.last_name, s.first_name`, scope.params));
 }));
 
 r.get('/students/:id', h(async (req, res) => {
+  const scope = studentScope(req.session.user!);
   const s = await one(`
     SELECT s.student_id, s.student_no, s.first_name, s.middle_name, s.last_name, s.course, s.year_level, s.gender,
            s.section_id, s.parent_email, s.face_consent_at, s.face_consent_by, sec.section_name,
            (SELECT COUNT(*) FROM student_faces f WHERE f.student_id = s.student_id) AS face_samples
-    FROM students s LEFT JOIN sections sec ON s.section_id = sec.section_id WHERE s.student_id = ?`, [int(req.params.id)]);
+    FROM students s LEFT JOIN sections sec ON s.section_id = sec.section_id WHERE s.student_id = ? ${scope.sql}`, [int(req.params.id), ...scope.params]);
   if (!s) throw new HttpError(404, 'Student not found.');
   res.json(s);
 }));
@@ -40,6 +213,12 @@ function studentFields(b: any) {
 
 r.post('/students', h(async (req, res) => {
   const f = studentFields(req.body);
+  if (req.session.user!.role === 'teacher') {
+    const sections = await importSections(req.session.user!);
+    if (f[7] === null || !sections.some(s => Number(s.section_id) === f[7])) {
+      throw new HttpError(403, 'You can only add students to a section assigned to you.');
+    }
+  }
   const r2 = await exec(`INSERT INTO students (student_no, first_name, middle_name, last_name, course, year_level, gender, section_id, parent_email)
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, f)
     .catch(e => dupMessage(e, `Student ID "${f[0]}" is already taken. Please use a different ID.`));
@@ -48,14 +227,29 @@ r.post('/students', h(async (req, res) => {
 
 r.put('/students/:id', h(async (req, res) => {
   const f = studentFields(req.body);
+  const isTeacher = req.session.user!.role === 'teacher';
+  if (req.session.user!.role === 'teacher') {
+    const sections = await importSections(req.session.user!);
+    if (f[7] === null || !sections.some(s => Number(s.section_id) === f[7])) {
+      throw new HttpError(403, 'You can only assign students to a section assigned to you.');
+    }
+  }
+  const scopeSql = isTeacher
+    ? ' AND section_id IN (SELECT section_id FROM sections WHERE class_id IN (SELECT class_id FROM classes WHERE teacher_id=?))'
+    : '';
   await exec(`UPDATE students SET student_no=?, first_name=?, middle_name=?, last_name=?, course=?, year_level=?, gender=?, section_id=?, parent_email=?
-              WHERE student_id=?`, [...f, int(req.params.id)])
+              WHERE student_id=? ${scopeSql}`, [...f, int(req.params.id), ...(isTeacher ? [req.session.user!.teacher_id] : [])])
     .catch(e => dupMessage(e, `Student ID "${f[0]}" is already taken.`));
   res.json({ ok: true });
 }));
 
 r.delete('/students/:id', h(async (req, res) => {
-  await exec('DELETE FROM students WHERE student_id=?', [int(req.params.id)]);
+  const scope = studentScope(req.session.user!);
+  const scopedDelete = scope.sql
+    ? `DELETE FROM students WHERE student_id=? AND section_id IN
+       (SELECT section_id FROM sections WHERE class_id IN (SELECT class_id FROM classes WHERE teacher_id=?))`
+    : 'DELETE FROM students WHERE student_id=?';
+  await exec(scopedDelete, [int(req.params.id), ...scope.params]);
   res.json({ ok: true });
 }));
 

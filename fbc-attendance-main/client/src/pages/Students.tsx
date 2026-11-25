@@ -4,17 +4,22 @@ import { api, type Student } from '../api';
 import { useApi, useMessage } from '../hooks';
 import { Alert } from '../Layout';
 import { Icon } from '../icons';
-import { Empty, IconLabel, Modal } from '../ui';
+import { DataState, Empty, IconLabel, Modal } from '../ui';
 import { QrImage } from '../qr';
 import { StudentWizard } from './StudentWizard';
+import { StudentImport } from './StudentImport';
 
 export default function Students() {
-  const { data: students, reload } = useApi<Student[]>('/students');
+  const { data: students, loading, error, reload } = useApi<Student[]>('/students', 15000);
   const { msg, run } = useMessage();
   const [q, setQ] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
+  const [sectionFilter, setSectionFilter] = useState('');
+  const [assignmentFilter, setAssignmentFilter] = useState('');
 
   // Pop-up state: 'new' to add a student, or a student id to finish their face registration.
   const [wizard, setWizard] = useState<'new' | number | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [qrFor, setQrFor] = useState<Student | null>(null);
   const closeQr = useCallback(() => setQrFor(null), []);
   const closeWizard = useCallback(() => setWizard(null), []);
@@ -24,8 +29,13 @@ export default function Students() {
   };
 
   const needle = q.trim().toLowerCase();
-  const shown = students?.filter(s => !needle ||
-    `${s.first_name} ${s.last_name} ${s.student_no} ${s.year_level ?? ''} ${s.section_name ?? ''}`.toLowerCase().includes(needle));
+  const shown = students?.filter(s =>
+    (!needle || `${s.first_name} ${s.last_name} ${s.student_no} ${s.year_level ?? ''} ${s.section_name ?? ''}`.toLowerCase().includes(needle)) &&
+    (!yearFilter || s.year_level === yearFilter) &&
+    (!sectionFilter || String(s.section_id ?? '') === sectionFilter) &&
+    (!assignmentFilter || (assignmentFilter === 'assigned' ? s.section_id != null : s.section_id == null)));
+  const years = [...new Set(students?.map(s => s.year_level).filter((v): v is string => !!v) ?? [])].sort();
+  const sections = [...new Map((students ?? []).filter(s => s.section_id != null).map(s => [s.section_id!, s.section_name ?? `Section ${s.section_id}`])).entries()];
   const registered = students?.filter(s => s.face_samples > 0).length ?? 0;
 
   return (
@@ -33,10 +43,20 @@ export default function Students() {
       <Alert msg={msg} />
       <div className="toolbar">
         <button className="btn btn-primary add-btn" onClick={() => setWizard('new')}><IconLabel icon="plus">Add student</IconLabel></button>
+        <button className="btn btn-outline add-btn" onClick={() => setImportOpen(true)}><IconLabel icon="list">Import students</IconLabel></button>
         <label className="search">
           <Icon name="search" />
           <input placeholder="Search by name, ID, year or section" value={q} onChange={e => setQ(e.target.value)} />
         </label>
+        <select aria-label="Filter by year level" value={yearFilter} onChange={e => setYearFilter(e.target.value)}>
+          <option value="">All year levels</option>{years.map(year => <option key={year}>{year}</option>)}
+        </select>
+        <select aria-label="Filter by section" value={sectionFilter} onChange={e => setSectionFilter(e.target.value)}>
+          <option value="">All sections</option>{sections.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <select aria-label="Filter by section assignment" value={assignmentFilter} onChange={e => setAssignmentFilter(e.target.value)}>
+          <option value="">All section assignments</option><option value="assigned">Assigned to section</option><option value="unassigned">Unassigned</option>
+        </select>
         <Link to="/students/qr-cards" className="btn btn-outline" title="Print a QR card for every student, for when the camera doesn't recognize a face">
           <IconLabel icon="list">Print QR cards</IconLabel></Link>
       </div>
@@ -44,7 +64,7 @@ export default function Students() {
       {students && students.length > 0 &&
         <p className="page-hint">{registered} of {students.length} students can use face check-in. The rest are marked by hand.</p>}
 
-      {students && students.length === 0 ? (
+      {students === null ? <DataState loading={loading} error={error} onRetry={reload} /> : error ? <DataState loading={false} error={error} onRetry={reload} /> : students.length === 0 ? (
         <Empty><p>No students yet. Press <strong>Add student</strong> to add the first one.</p></Empty>
       ) : (
         <div className="card" style={{ padding: '8px 16px' }}>
@@ -78,7 +98,7 @@ export default function Students() {
                     </div>
                   </td>
                 </tr>
-              )) : <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>{students ? 'No students match your search.' : 'Loading…'}</td></tr>}
+              )) : <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>No students match these filters.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -86,6 +106,7 @@ export default function Students() {
 
       {qrFor && <QrModal student={qrFor} onClose={closeQr} />}
       {wizard !== null && <StudentWizard key={String(wizard)} studentId={wizard === 'new' ? undefined : wizard} onClose={closeWizard} onChanged={reload} />}
+      {importOpen && <StudentImport onClose={() => setImportOpen(false)} onChanged={reload} />}
     </>
   );
 }

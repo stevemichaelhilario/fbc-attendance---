@@ -21,6 +21,7 @@ import TakeAttendance from './pages/TakeAttendance';
 import Records from './pages/Records';
 import Setup from './pages/Setup';
 import Kiosk from './pages/Kiosk';
+import ParentDashboard, { ParentChildHistory } from './pages/ParentDashboard';
 // The 3D classroom is large, so it loads only when opened.
 const Classroom = lazy(() => import('./pages/Classroom'));
 const QrCards = lazy(() => import('./pages/QrCards'));
@@ -41,12 +42,28 @@ function App() {
   if (!me.user) return location.pathname === '/' ? <Landing signedIn={false} /> : <Navigate to="/" replace />;
 
   const user = me.user;
+  if (user.role === 'parent') {
+    return (
+      <Routes>
+        <Route path="/parent/students/:id/attendance" element={
+          <Layout user={user} title="Attendance History" hint="Attendance records for your linked child.">
+            <ParentChildHistory />
+          </Layout>
+        } />
+        <Route path="*" element={
+          <Layout user={user} title="Parent Dashboard" hint="Live attendance and notifications for your linked children.">
+            <ParentDashboard />
+          </Layout>
+        } />
+      </Routes>
+    );
+  }
   const hint = (to: string) => NAV.find(n => n.to === to)?.hint;
   const page = (title: string, el: React.ReactNode, to?: string) => <Layout user={user} title={title} hint={to && hint(to)}>{el}</Layout>;
   const startKiosk = () => setMe({ user: null, kiosk: true });
   return (
     <Routes>
-      <Route path="/" element={page('Home', <Dashboard />, '/')} />
+      <Route path="/" element={page('Home', <Dashboard user={user} />, '/')} />
       <Route path="/welcome" element={<Landing signedIn />} />
       <Route path="/attendance" element={page('Take Attendance', <TakeAttendance onKioskStarted={startKiosk} />, '/attendance')} />
       <Route path="/classroom" element={page('Classroom', <Suspense fallback={null}><Classroom user={user} /></Suspense>, '/classroom')} />

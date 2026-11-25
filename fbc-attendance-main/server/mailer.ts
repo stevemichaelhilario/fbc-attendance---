@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import { config } from './config.js';
-import { one } from './db.js';
+import { exec, one } from './db.js';
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
@@ -131,6 +131,21 @@ export function sendLateEmail(parentEmail: string, studentName: string, date: st
     `Dear Parent/Guardian,\n\nYour child ${studentName} arrived LATE on ${longDate(date)}.\n\nFBC Attendance System`);
 }
 
+export function sendArrivalEmail(parentEmail: string, studentName: string, date: string, time?: string) {
+  const rows: [string, string][] = [['Student Name', esc(studentName)], ['Date', longDate(date)]];
+  if (time) rows.push(['Time In', esc(time)]);
+  rows.push(['Status', pill('#dcfce7', '#166534', 'ARRIVED')]);
+  const html = render({
+    bannerStyle: 'background:#dcfce7;padding:14px 32px;border-bottom:1px solid #86efac;',
+    banner: '<p style="margin:0;color:#166534;font-size:13.5px;font-weight:600;">&#9989; Arrival Confirmation</p>',
+    intro: 'Your child has arrived and was checked in successfully.',
+    rows,
+    after: note('This is an automatic attendance notification.'),
+  });
+  return send(parentEmail, `Arrival Confirmation - ${studentName}`, html,
+    `Dear Parent/Guardian,\n\nYour child ${studentName} arrived on ${longDate(date)}${time ? ` at ${time}` : ''}.\n\nFBC Attendance System`);
+}
+
 export async function absenceCount(studentId: number): Promise<number> {
   const r = await one<{ cnt: number }>("SELECT COUNT(*) AS cnt FROM attendance WHERE student_id=? AND status='Absent'", [studentId]);
   return Number(r?.cnt ?? 0);
@@ -138,12 +153,36 @@ export async function absenceCount(studentId: number): Promise<number> {
 
 /** Emails parents after a status change, same rules as Record Attendance. */
 export async function notifyParents(studentId: number, status: string, date: string, time?: string) {
-  if (status !== 'Absent' && status !== 'Late') return;
+  if (!['Present', 'Late', 'Absent'].includes(status)) return;
   const stu = await one('SELECT first_name, last_name, parent_email FROM students WHERE student_id=?', [studentId]);
   if (!stu?.parent_email) return;
   const name = `${stu.first_name} ${stu.last_name}`;
-  if (status === 'Late') { await sendLateEmail(stu.parent_email, name, date, time); return; }
-  await sendAbsenceEmail(stu.parent_email, name, date);
-  const count = await absenceCount(studentId);
-  if (count >= 3) await sendThreeAbsenceWarning(stu.parent_email, name, count);
+  const eventKey = `${status}:${studentId}:${date}`;
+  const existing = await one('SELECT notification_id FROM notifications WHERE recipient_email=? AND event_key=?',
+    [stu.parent_email, eventKey]);
+  if (existing) return;
+  const subject = status === 'Present' ? `Arrival Confirmation - ${name}`
+    : status === 'Late' ? `Late Attendance Notice - ${name}` : `Absence Notice - ${name}`;
+  const sent = status === 'Present'
+    ? await sendArrivalEmail(stu.parent_email, name, date, time)
+    : status === 'Late'
+      ? await sendLateEmail(stu.parent_email, name, date, time)
+      : await sendAbsenceEmail(stu.parent_email, name, date);
+  await exec(`INSERT INTO notifications (student_id, recipient_email, subject, message, event_type, event_key)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+    [studentId, stu.parent_email, subject, sent.message, status.toLowerCase(), eventKey]);
+  if (status === 'Absent') {
+    const count = await absenceCount(studentId);
+    if (count >= 3) {
+      const warningKey = `warning:${studentId}:${date}:${count}`;
+      const warningExists = await one('SELECT notification_id FROM notifications WHERE recipient_email=? AND event_key=?',
+        [stu.parent_email, warningKey]);
+      if (!warningExists) {
+        const warning = await sendThreeAbsenceWarning(stu.parent_email, name, count);
+        await exec(`INSERT INTO notifications (student_id, recipient_email, subject, message, event_type, event_key)
+                    VALUES (?, ?, ?, ?, 'warning', ?)`,
+          [studentId, stu.parent_email, `Absence Warning - ${name} has ${count} absences`, warning.message, warningKey]);
+      }
+    }
+  }
 }

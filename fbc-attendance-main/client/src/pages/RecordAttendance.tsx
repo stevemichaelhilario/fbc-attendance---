@@ -6,7 +6,7 @@ import { Alert } from '../Layout';
 import { Empty, IconLabel } from '../ui';
 
 interface Sheet {
-  date: string; day: string;
+  date: string; day: string; section_id: number;
   students: { student_id: number; student_no: string; first_name: string; last_name: string;
               status: string | null; time_in: string | null; method: string | null; absences: number }[];
   schedules: { schedule_id: number; subject: string | null; class_name: string; time_start: string; time_end: string; room: string | null }[];
@@ -25,12 +25,15 @@ export default function RecordAttendance() {
   useEffect(() => {
     if (sheet) { setStatuses(Object.fromEntries(sheet.students.map(s => [s.student_id, s.status ?? 'Present']))); setDirty(false); }
   }, [sheet]);
+  useEffect(() => {
+    if (!sectionId && sections?.length === 1) setSectionId(sections[0].section_id);
+  }, [sections, sectionId]);
   useEffect(() => { setMsg(null); }, [sectionId, date]);
 
   const setOne = (id: number, st: string) => { setStatuses({ ...statuses, [id]: st }); setDirty(true); };
   const setAll = (st: string) => { setStatuses(Object.fromEntries(Object.keys(statuses).map(id => [id, st]))); setDirty(true); };
   const save = async () => {
-    if (await run(() => api('/attendance/sheet', { body: { date: sheet!.date, statuses } }),
+    if (await run(() => api('/attendance/sheet', { body: { date: sheet!.date, section_id: sheet!.section_id, statuses } }),
                   `Saved. Attendance for ${longDate(sheet!.date)} is recorded.`)) reload();
   };
 

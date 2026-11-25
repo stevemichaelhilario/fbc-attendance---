@@ -2,15 +2,24 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 
 /** Loads data from the API and lets the page reload it after a change. */
-export function useApi<T>(path: string | null) {
+export function useApi<T>(path: string | null, pollMs = 0) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(!!path);
   const load = useCallback(() => {
-    if (!path) return;
-    api<T>(path).then(d => { setData(d); setError(''); }).catch(e => setError(e.message));
+    if (!path) { setLoading(false); return; }
+    setLoading(true);
+    api<T>(path).then(d => { setData(d); setError(''); })
+      .catch(e => setError(e instanceof Error ? e.message : 'Unable to load data.'))
+      .finally(() => setLoading(false));
   }, [path]);
-  useEffect(load, [load]);
-  return { data, error, reload: load };
+  useEffect(() => {
+    load();
+    if (!pollMs) return;
+    const timer = window.setInterval(load, pollMs);
+    return () => window.clearInterval(timer);
+  }, [load, pollMs]);
+  return { data, error, loading, reload: load };
 }
 
 /** Message banner state: shows success or error text from an action. */

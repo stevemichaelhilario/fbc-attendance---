@@ -18,7 +18,9 @@ export async function runAutoAbsent(date = today(), dryRun = false, log = consol
     ? 'AND s.face_consent_at IS NOT NULL AND EXISTS (SELECT 1 FROM student_faces f WHERE f.student_id = s.student_id)'
     : '';
   const students = await query(`SELECT s.* FROM students s
-    WHERE NOT EXISTS (SELECT 1 FROM attendance a WHERE a.student_id = s.student_id AND a.date = ?) ${enrolledOnly}`, [date]);
+    WHERE s.section_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM sections sec WHERE sec.section_id = s.section_id)
+      AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.student_id = s.student_id AND a.date = ?) ${enrolledOnly}`, [date]);
 
   let marked = 0;
   for (const stu of students) {

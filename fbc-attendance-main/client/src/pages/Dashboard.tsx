@@ -3,10 +3,59 @@ import { Link } from 'react-router-dom';
 import { longDate } from '../api';
 import { useApi } from '../hooks';
 import { Icon } from '../icons';
+import { DataState } from '../ui';
+import type { User } from '../api';
 
 interface Stats {
   date: string; students: number; teachers: number; classes: number; sections: number; faces: number;
   present: number; absent: number; late: number; excused: number;
+}
+
+interface TeacherStudent {
+  student_id: number; student_no: string; first_name: string; last_name: string;
+  course: string | null; year_level: string | null; section_id: number; section_name: string;
+  class_id: number; class_name: string; status: string | null; time_in: string | null;
+}
+
+function TeacherRoster() {
+  const { data, loading, error, reload } = useApi<TeacherStudent[]>('/teacher/students', 10000);
+  if (!data) return <DataState loading={loading} error={error} onRetry={reload} />;
+  if (data.length === 0) return <div className="card data-state">No students are assigned to your classes yet.</div>;
+  const classes = [...new Set(data.map(s => s.class_id))];
+  return (
+    <>
+      <div className="sec-title" style={{ marginTop: 26 }}>Your students</div>
+      {classes.map(classId => {
+        const students = data.filter(s => s.class_id === classId);
+        const sections = [...new Set(students.map(s => s.section_id))];
+        return (
+          <section className="card teacher-class-card" key={classId}>
+            <h3>{students[0].class_name}</h3>
+            {sections.map(sectionId => {
+              const sectionStudents = students.filter(s => s.section_id === sectionId);
+              return (
+                <div className="teacher-section" key={sectionId}>
+                  <h4>{sectionStudents[0].section_name}</h4>
+                  <div className="teacher-student-grid">
+                    {sectionStudents.map(s => (
+                      <article className="teacher-student-card" key={s.student_id}>
+                        <strong>{s.last_name}, {s.first_name}</strong>
+                        <span className="muted">{s.student_no}{s.course ? ` · ${s.course}` : ''}{s.year_level ? ` · ${s.year_level}` : ''}</span>
+                        <span className={`badge ${s.status === 'Present' ? 'badge-present' : s.status === 'Late' ? 'badge-late' : s.status === 'Absent' ? 'badge-absent' : s.status === 'Excused' ? 'badge-excused' : 'badge-muted'}`}>
+                          {s.status || 'Not recorded'}
+                        </span>
+                        {s.time_in && <span className="muted">Time in {s.time_in.slice(0, 5)}</span>}
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        );
+      })}
+    </>
+  );
 }
 
 /** Counts up from 0 to the value so the numbers animate in. */
@@ -59,9 +108,9 @@ function setupSteps(s: Stats): [boolean, string, string, string][] {
   ];
 }
 
-export default function Dashboard() {
-  const { data: s } = useApi<Stats>('/dashboard');
-  if (!s) return null;
+export default function Dashboard({ user }: { user: User }) {
+  const { data: s, loading, error, reload } = useApi<Stats>('/dashboard', 10000);
+  if (!s) return <DataState loading={loading} error={error} onRetry={reload} />;
   const marked = s.present + s.absent + s.late + s.excused;
   const onTime = marked ? Math.round((s.present / marked) * 100) : 0;
   const hour = new Date().getHours();
@@ -107,6 +156,8 @@ export default function Dashboard() {
         {stat(s.present, 'Present', 'check', '#86efac')}{stat(s.late, 'Late', 'clock', '#fcd34d')}
         {stat(s.absent, 'Absent', 'x', '#fca5a5')}{stat(s.excused, 'Excused', 'shield', '#93c5fd')}
       </div>
+
+      {user.role === 'teacher' && <TeacherRoster />}
 
       {nextStep >= 0 && <>
         <div className="sec-title" style={{ marginTop: 26 }}>Finish setting up</div>
