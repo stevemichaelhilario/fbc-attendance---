@@ -8,7 +8,7 @@ import type { SessionUser } from '../auth.js';
 const r = express.Router();
 
 function dupMessage(e: any, what: string): never {
-  if (e?.code === 'ER_DUP_ENTRY') throw new HttpError(409, what);
+  if (isUniqueViolation(e)) throw new HttpError(409, what);
   throw e;
 }
 
@@ -256,30 +256,94 @@ r.delete('/students/:id', h(async (req, res) => {
 // ---- Teachers ----
 // has_account: the teacher can sign in with their email and a password.
 const TEACHER_SQL = `SELECT t.*, (u.password_hash IS NOT NULL) AS has_account
+  , (SELECT COUNT(*) FROM sections sec JOIN classes c ON c.class_id=sec.class_id
+     WHERE c.teacher_id=t.teacher_id) AS assigned_sections
   FROM teachers t LEFT JOIN users u ON u.email = t.email`;
 r.get('/teachers', h(async (_req, res) => {
   res.json(await query(`${TEACHER_SQL} ORDER BY t.last_name, t.first_name`));
 }));
 r.get('/teachers/:id', h(async (req, res) => {
+  if (req.session.user!.role !== 'admin') throw new HttpError(403, 'Only admins can view teacher details.');
   const t = await one(`${TEACHER_SQL} WHERE t.teacher_id=?`, [int(req.params.id)]);
   if (!t) throw new HttpError(404, 'Teacher not found.');
   res.json(t);
 }));
 function teacherFields(b: any) {
   required(b, ['first_name', 'last_name', 'email']);
-  return [text(b.first_name, 80), text(b.last_name, 80), text(b.email, 150), text(b.department, 100)];
+  const firstName = text(b.first_name, 80);
+  const lastName = text(b.last_name, 80);
+  const email = text(b.email, 150).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Enter a valid teacher email address.');
+  if (b.is_active !== undefined && typeof b.is_active !== 'boolean') throw new HttpError(400, 'Teacher status is invalid.');
+  return [firstName, lastName, email, text(b.department, 100), b.is_active];
 }
 r.post('/teachers', h(async (req, res) => {
+  if (req.session.user!.role !== 'admin') throw new HttpError(403, 'Only admins can manage teachers.');
   const f = teacherFields(req.body);
-  await exec('INSERT INTO teachers (first_name, last_name, email, department) VALUES (?, ?, ?, ?)', f)
+  await exec('INSERT INTO teachers (first_name, last_name, email, department, is_active) VALUES (?, ?, ?, ?, ?)', [...f.slice(0, 4), f[4] ?? true])
     .catch(e => dupMessage(e, `A teacher with email ${f[2]} already exists.`));
   res.json({ ok: true });
 }));
 r.put('/teachers/:id', h(async (req, res) => {
+  if (req.session.user!.role !== 'admin') throw new HttpError(403, 'Only admins can manage teachers.');
   const f = teacherFields(req.body);
-  await exec('UPDATE teachers SET first_name=?, last_name=?, email=?, department=? WHERE teacher_id=?', [...f, int(req.params.id)])
+  const id = int(req.params.id);
+  if (!id) throw new HttpError(400, 'Invalid teacher ID.');
+  const teacher = await one('SELECT teacher_id, email FROM teachers WHERE teacher_id=?', [id]);
+  if (!teacher) throw new HttpError(404, 'Teacher not found.');
+  await transaction(async run => {
+    await run(`UPDATE teachers SET first_name=?, last_name=?, email=?, department=?${f[4] === undefined ? '' : ', is_active=?'} WHERE teacher_id=?`,
+      f[4] === undefined ? [...f.slice(0, 4), id] : [...f, id]);
+    await run('UPDATE users SET email=?, name=? WHERE email=?', [f[2], `${f[0]} ${f[1]}`, teacher.email]);
+  })
     .catch(e => dupMessage(e, `A teacher with email ${f[2]} already exists.`));
   res.json({ ok: true });
+}));
+// Assignments use the existing classes.teacher_id relationship; all sections of each selected class follow it.
+r.put('/teachers/:id/assignments', h(async (req, res) => {
+  if (req.session.user!.role !== 'admin') throw new HttpError(403, 'Only admins can assign classes.');
+  const teacherId = int(req.params.id);
+  if (!teacherId) throw new HttpError(400, 'Invalid teacher ID.');
+  const teacher = await one('SELECT teacher_id, is_active FROM teachers WHERE teacher_id=?', [teacherId]);
+  if (!teacher) throw new HttpError(404, 'Teacher not found.');
+  const rawIds: unknown = req.body?.class_ids;
+  if (!Array.isArray(rawIds) || rawIds.some(id => !Number.isSafeInteger(Number(id)) || Number(id) < 1))
+    throw new HttpError(400, 'Choose valid classes.');
+  const classIds = rawIds.map(Number);
+  if (new Set(classIds).size !== classIds.length) throw new HttpError(400, 'Duplicate class assignments are not allowed.');
+  const current = classIds.length
+    ? await query<{ class_id: number; teacher_id: number | null }>(
+      `SELECT class_id, teacher_id FROM classes WHERE class_id IN (${classIds.map(() => '?').join(',')})`, classIds)
+    : [];
+  if (current.length !== classIds.length) throw new HttpError(400, 'One or more selected classes no longer exist.');
+  if (!teacher.is_active && current.some(c => Number(c.teacher_id) !== teacherId))
+    throw new HttpError(409, 'Activate this teacher before assigning new classes.');
+  await transaction(async run => {
+    if (classIds.length) {
+      await run(`UPDATE classes SET teacher_id=NULL WHERE teacher_id=? AND class_id NOT IN (${classIds.map(() => '?').join(',')})`,
+        [teacherId, ...classIds]);
+      await run(`UPDATE classes SET teacher_id=? WHERE class_id IN (${classIds.map(() => '?').join(',')})`,
+        [teacherId, ...classIds]);
+    } else {
+      await run('UPDATE classes SET teacher_id=NULL WHERE teacher_id=?', [teacherId]);
+    }
+  });
+  res.json({ ok: true, reassigned: current.filter(c => c.teacher_id && Number(c.teacher_id) !== teacherId).length });
+}));
+r.get('/teachers/:id/students', h(async (req, res) => {
+  if (req.session.user!.role !== 'admin') throw new HttpError(403, 'Only admins can view a teacher roster.');
+  const teacherId = int(req.params.id);
+  if (!teacherId) throw new HttpError(400, 'Invalid teacher ID.');
+  if (!await one('SELECT teacher_id FROM teachers WHERE teacher_id=?', [teacherId]))
+    throw new HttpError(404, 'Teacher not found.');
+  res.json(await query(`
+    SELECT s.student_id, s.student_no, s.first_name, s.middle_name, s.last_name,
+           sec.section_name, c.class_name
+    FROM students s
+    JOIN sections sec ON sec.section_id=s.section_id
+    JOIN classes c ON c.class_id=sec.class_id
+    WHERE c.teacher_id=?
+    ORDER BY c.class_name, sec.section_name, s.last_name, s.first_name`, [teacherId]));
 }));
 // Admins give a teacher a sign-in: their email plus a password set here.
 r.put('/teachers/:id/account', h(async (req, res) => {
@@ -301,7 +365,11 @@ r.delete('/teachers/:id/account', h(async (req, res) => {
   res.json({ ok: true });
 }));
 r.delete('/teachers/:id', h(async (req, res) => {
-  await exec('DELETE FROM teachers WHERE teacher_id=?', [int(req.params.id)]);
+  if (req.session.user!.role !== 'admin') throw new HttpError(403, 'Only admins can archive teachers.');
+  const id = int(req.params.id);
+  if (!id) throw new HttpError(400, 'Invalid teacher ID.');
+  if (!await one('SELECT teacher_id FROM teachers WHERE teacher_id=?', [id])) throw new HttpError(404, 'Teacher not found.');
+  await exec('UPDATE teachers SET is_active=FALSE WHERE teacher_id=?', [id]);
   res.json({ ok: true });
 }));
 
@@ -324,8 +392,11 @@ r.post('/classes', h(async (req, res) => {
   required(b, ['class_name']);
   const withSchedule = b.day_of_week && b.time_start && b.time_end;
   if (withSchedule) checkSchedule(b);
+  const teacherId = nullableId(b.teacher_id);
+  if (teacherId && !await one('SELECT teacher_id FROM teachers WHERE teacher_id=? AND is_active=TRUE', [teacherId]))
+    throw new HttpError(400, 'Choose an active teacher.');
   const c = await exec('INSERT INTO classes (class_name, subject, teacher_id) VALUES (?, ?, ?)',
-    [text(b.class_name, 100), text(b.subject, 100), nullableId(b.teacher_id)]);
+    [text(b.class_name, 100), text(b.subject, 100), teacherId]);
   if (withSchedule) await addSchedule({ ...b, class_id: c.insertId });
   res.json({ ok: true });
 }));

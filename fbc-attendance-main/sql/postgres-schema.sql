@@ -19,8 +19,10 @@ CREATE TABLE IF NOT EXISTS teachers (
   email VARCHAR(150) NOT NULL UNIQUE,
   department VARCHAR(100),
   created_at TIMESTAMP(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  gender VARCHAR(10) CHECK (gender IN ('Male','Female','Other'))
+  gender VARCHAR(10) CHECK (gender IN ('Male','Female','Other')),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
+ALTER TABLE teachers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 CREATE TABLE IF NOT EXISTS classes (
   class_id SERIAL PRIMARY KEY,
   class_name VARCHAR(100) NOT NULL,

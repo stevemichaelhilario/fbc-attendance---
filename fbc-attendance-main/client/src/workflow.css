@@ -53,6 +53,18 @@ kbd { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 12px; paddi
 .teacher-section h4 { margin: 0 0 10px; color: var(--muted); }
 .teacher-student-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
 .teacher-student-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; background: var(--white); }
+.teacher-summary { margin-bottom: 18px; }
+.teacher-table-card, .teacher-roster-table { overflow-x: auto; padding: 8px 16px; }
+.teacher-actions { min-width: 290px; }
+.teacher-no-results { text-align: center; color: var(--muted); padding: 24px; }
+.teacher-class-options { display: grid; gap: 8px; max-height: 48vh; overflow-y: auto; margin: 16px 0; }
+.teacher-class-option { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.teacher-class-option input { margin-top: 4px; }
+.teacher-class-option > span { display: grid; gap: 4px; }
+@media (max-width: 700px) {
+  .teacher-table-card, .teacher-roster-table { padding: 4px 8px; }
+  .teacher-summary .stat-card { padding: 14px; }
+}
 .toolbar > .add-panel { flex: 1 1 100%; order: 2; margin-bottom: 0; }
 .add-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .search { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 220px; max-width: 420px; padding: 0 14px; border-radius: 12px; box-shadow: var(--neu-inset-sm); color: var(--muted); }

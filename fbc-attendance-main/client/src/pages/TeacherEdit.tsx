@@ -19,7 +19,7 @@ export default function TeacherEdit() {
       <Alert msg={msg} />
       <div className="sec-title">Edit Teacher</div>
       <div className="card">
-        <TeacherForm initial={{ first_name: t.first_name, last_name: t.last_name, email: t.email, department: t.department ?? '' }}
+        <TeacherForm teacherId={t.teacher_id} initial={{ first_name: t.first_name, last_name: t.last_name, email: t.email, department: t.department ?? '', is_active: t.is_active === true || t.is_active === 1 }}
                      submitLabel="Save changes" onSubmit={save} />
         <div style={{ marginTop: 12 }}><Link to="/setup?tab=teachers" className="btn btn-outline btn-sm"><IconLabel icon="back">Back to teachers</IconLabel></Link></div>
       </div>

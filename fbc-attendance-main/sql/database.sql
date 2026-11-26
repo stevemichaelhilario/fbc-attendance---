@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS teachers (
     last_name   VARCHAR(80)  NOT NULL,
     email       VARCHAR(150) NOT NULL UNIQUE,
     department  VARCHAR(100),
+    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

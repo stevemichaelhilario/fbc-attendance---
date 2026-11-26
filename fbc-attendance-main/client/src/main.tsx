@@ -13,6 +13,7 @@ import { Layout, NAV } from './Layout';
 import Login from './pages/Login';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
+import Teachers from './pages/Teachers';
 import Students from './pages/Students';
 import StudentEdit from './pages/StudentEdit';
 import FaceEnroll from './pages/FaceEnroll';
@@ -72,11 +73,11 @@ function App() {
       <Route path="/students/:id/edit" element={page('Edit Student', <StudentEdit />)} />
       <Route path="/students/:id/face" element={page('Register Face', <FaceEnroll />)} />
       <Route path="/records" element={page('Records', <Records />, '/records')} />
+      <Route path="/teachers" element={user.role === 'admin' ? page('Teacher Management', <Teachers />, '/teachers') : <Navigate to="/" replace />} />
       <Route path="/setup" element={page('School Setup', <Setup />, '/setup')} />
-      <Route path="/teachers/:id/edit" element={page('Edit Teacher', <TeacherEdit />)} />
+      <Route path="/teachers/:id/edit" element={user.role === 'admin' ? page('Edit Teacher', <TeacherEdit />) : <Navigate to="/" replace />} />
       {/* Old addresses from before the menu was simplified. */}
       <Route path="/kiosk" element={<Navigate to="/attendance?tab=kiosk" replace />} />
-      <Route path="/teachers" element={<Navigate to="/setup?tab=teachers" replace />} />
       <Route path="/classes" element={<Navigate to="/setup?tab=classes" replace />} />
       <Route path="/reports" element={<Navigate to="/records?tab=monthly" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />

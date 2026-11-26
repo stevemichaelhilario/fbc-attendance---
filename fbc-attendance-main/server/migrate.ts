@@ -24,6 +24,7 @@ const TABLES: Record<string, string> = {
     last_name VARCHAR(80) NOT NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
     department VARCHAR(100),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`,
   classes: `CREATE TABLE IF NOT EXISTS classes (
     class_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -116,6 +117,7 @@ const COLUMNS: [string, string, string][] = [
   ['sections', 'course', 'VARCHAR(100) NULL'],
   ['sections', 'year_level', 'VARCHAR(30) NULL'],
   ['teachers', 'gender', "ENUM('Male','Female','Other') NULL"],
+  ['teachers', 'is_active', 'BOOLEAN NOT NULL DEFAULT TRUE'],
   ['students', 'face_consent_at', 'TIMESTAMP NULL'],
   ['students', 'face_consent_by', 'VARCHAR(150) NULL'],
   ['attendance', 'time_in', 'TIME NULL'],

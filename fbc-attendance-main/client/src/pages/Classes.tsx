@@ -6,7 +6,7 @@ import { AddPanel, Empty, IconLabel } from '../ui';
 import type { Teacher } from './Teachers';
 
 interface Data {
-  classes: { class_id: number; class_name: string; subject: string | null; teacher_name: string | null }[];
+  classes: { class_id: number; class_name: string; subject: string | null; teacher_id: number | null; teacher_name: string | null }[];
   sections: { section_id: number; section_name: string; class_id: number | null; class_name: string | null }[];
   schedules: { schedule_id: number; class_name: string; subject: string | null; section_name: string | null;
                day_of_week: string; time_start: string; time_end: string; room: string | null }[];
@@ -45,7 +45,7 @@ export function ClassesTab() {
               <div className="form-group"><label>Teacher (optional)</label>
                 <select value={cls.teacher_id} onChange={e => setCls({ ...cls, teacher_id: e.target.value })}>
                   <option value="">No teacher yet</option>
-                  {teachers?.map(t => <option key={t.teacher_id} value={t.teacher_id}>{`${t.last_name}, ${t.first_name}`}</option>)}
+                  {teachers?.filter(t => t.is_active === true || t.is_active === 1).map(t => <option key={t.teacher_id} value={t.teacher_id}>{`${t.last_name}, ${t.first_name}`}</option>)}
                 </select></div>
             </div>
             <button className="btn btn-primary"><IconLabel icon="save">Save class</IconLabel></button>

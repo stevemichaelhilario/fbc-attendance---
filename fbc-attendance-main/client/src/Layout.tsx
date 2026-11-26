@@ -10,14 +10,16 @@ export const NAV: { to: string; label: string; icon: string; hint: string }[] = 
   { to: '/classroom', label: 'Classroom', icon: 'room', hint: 'Who should be in the room for the class on now, and who is, in 3D.' },
   { to: '/students', label: 'Students', icon: 'students', hint: 'Add students and register their faces.' },
   { to: '/records', label: 'Records', icon: 'list', hint: 'See past days and monthly totals.' },
-  { to: '/setup', label: 'School Setup', icon: 'settings', hint: 'Teachers, classes, sections and class times.' },
+  { to: '/setup', label: 'School Setup', icon: 'settings', hint: 'Classes, sections and class times.' },
 ];
 
 export function Layout({ user, title, hint, children }: { user: User; title: string; hint?: string; children: ReactNode }) {
   const navigate = useNavigate();
   const navigation = user.role === 'parent'
     ? [{ to: '/', label: 'Parent Dashboard', icon: 'home', hint: 'Linked children, live attendance and notification history.' }]
-    : NAV;
+    : user.role === 'admin'
+      ? [NAV[0], { to: '/teachers', label: 'Teachers', icon: 'teacher', hint: 'Manage teacher records, class assignments and rosters.' }, ...NAV.slice(1)]
+      : NAV;
   const logout = async () => { await fetch('/auth/logout', { method: 'POST' }).catch(() => {}); navigate('/login'); };
   return (
     <>
